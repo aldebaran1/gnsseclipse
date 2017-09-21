@@ -8,11 +8,16 @@ Created on Mon Sep  4 14:42:15 2017
 
 from scipy import signal
 import numpy as np
+import os
+import glob
 import datetime
 import pandas
 import yaml
+import h5py
+from mpl_toolkits.basemap import Basemap
 from gsit import pyGps
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 def butter_hpf(highcut, fs, order):
     """
@@ -92,7 +97,7 @@ def lpf(y, fc=0.1, order=5, fs=1, plot=False, group_delay=False):
     if group_delay:
         return y_filt, gd[1]
     else:
-        terurn y_filt
+        return y_filt
 
 def polynom(y, order=3):
         x = range(y.shape[0])
@@ -182,14 +187,16 @@ def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_second
                 tec = pyGps.getVerticalTEC(tec, aer[1][idel], alt)
                 
         t = t[idel]
+        
+        #Return time, TEC and respective third argumnet masked by an elavation mask angle
         if el==False and lla==False:
             return t, tec
         elif el==True and lla==False:
             return t, tec, aer[:,idel]
         elif el==False and lla ==True:
-            return t, tec, llt
+            return t, tec, llt[:,idel]
         else:
-            return t, tec, aer
+            return t, tec, aer[:,idel]
             
             
     else:
@@ -242,6 +249,21 @@ def _alignTimes(tlist, teclist, polylist, residuallist, fs):
         res2.append(res1[idt])
     return t, tec2, poly2, res2
 ################################################################################
+def getRxList(folder, sufix):
+#    wlstr = '*_15.17o'
+    filestr = os.path.join(folder,sufix)
+    flist = glob.glob(filestr)
+    rx = []
+    for f in flist:
+        head, tail = os.path.split(f)
+        rx.append(tail[0:4])
+    return rx
+################################################################################
+def createTimeArray(timelim):
+    ts = pyGps.datetime2posix(timelim)
+    t = range(int(ts[0]), int(ts[1])+1)
+    return np.array(t)
+################################################################################
 def _plotLOS(tlist, teclist, polylist, residuallist, rx='', sv=0, save=False,
              fig_path=None,
              pltlim = [datetime.datetime(2017,8,21,16,0,0), datetime.datetime(2017,8,21,21,0,0)]):
@@ -290,6 +312,11 @@ def _plotLOS(tlist, teclist, polylist, residuallist, rx='', sv=0, save=False,
             plt.savefig('/media/smrak/Eclipse2017/Eclipse/plots/cors/run4/'+rx+'_'+str(sv)+'.png', dpi=300)
         else:
             plt.savefig(fig_path+rx+'_'+str(sv)+'.png', dpi=300)
+        plt.close(fig)
+    else:
+        plt.show()
+
+            
             
 def _plotEclipseMap(filepath='totality.h5'):
     data = h5py.File(filepath, 'r')
@@ -319,3 +346,86 @@ def _plotEclipseMap(filepath='totality.h5'):
     m.plot(X1,Y1, c='b')
     m.plot(X2,Y2, c='b')
     plt.show()
+    
+def _plotDetrending(t, z, sv='',rx=None,order=[],save=False,fig_path=None, 
+                    pltlim = [datetime.datetime(2017,8,21,17,0,0), datetime.datetime(2017,8,21,21,0,0)]):
+    
+    fig = plt.figure(figsize=(12,8))
+    formatter = mdates.DateFormatter('%H:%M')
+    axs = []
+#    plt.title(rx+' - sv: '+str(sv))
+    for i in range(len(z)):
+        ax = fig.add_subplot(len(z),1,i+1)
+        axs.append(ax)
+        plt.setp(ax.get_xticklabels(), visible=False) 
+        plt.plot(t, z[i], label=order[i])
+        plt.plot( [pltlim[0], pltlim[-1]], [0,0], '--k')
+        plt.ylim([-0.8, 0.6])
+        plt.legend()
+        ax.set_ylabel('residuals')
+        ax.grid(axis='y')
+        ax.set_xlim(pltlim)
+    ax.xaxis.set(major_formatter=formatter)
+    plt.setp(ax.get_xticklabels(), visible=True)
+    ax.set_xlabel('UTC')
+    axs[0].set_title(rx+' - sv: '+str(sv))
+    plt.tight_layout()
+    
+    if save == True:
+        if fig_path is None:
+            plt.savefig('/media/smrak/Eclipse2017/Eclipse/plots/cors/detrending/orders_'+rx+'_'+str(sv)+'.png', dpi=300)
+        else:
+            plt.savefig(fig_path+rx+'_'+str(sv)+'.png', dpi=300)
+        plt.close(fig)
+    else:
+        plt.show()
+        plt.close(fig)
+    
+    
+def _plotResidualsTEC(t,vtec,stec,residuallist1,residuallist2,sv='',rx=None,order=[],save=False,fig_path=None,
+                   pltlim = [datetime.datetime(2017,8,21,17,0,0), datetime.datetime(2017,8,21,21,0,0)]):
+    fig = plt.figure(figsize=(12,8))
+    formatter = mdates.DateFormatter('%H:%M')
+    
+    ax1 = fig.add_subplot(411)
+    ax2 = fig.add_subplot(412, sharex=ax1)
+    ax3 = fig.add_subplot(413, sharex=ax1)
+    ax4 = fig.add_subplot(414, sharex=ax1)
+    
+    ax1.plot(t, stec, 'b')
+    
+    for i in range(len(residuallist1)):
+        ax2.plot(t,residuallist1[i], label = order[i])
+    ax2.plot( [t[0], t[-1]], [0,0], '--k')
+    ax2.grid(axis='y')
+    
+    ax3.plot(t, vtec, 'b')
+    
+    for i in range(len(residuallist1)):
+        ax4.plot(t,residuallist2[i], label = order[i])
+    ax4.plot( [t[0], t[-1]], [0,0], '--k')
+    ax4.grid(axis='y')
+    
+    ax1.set_title(rx+' - sv: '+str(sv))
+    ax1.set_ylabel('sTEC')
+    ax2.set_ylabel('residuals')
+    ax3.set_ylabel('vTEC')
+    ax4.set_ylabel('residuals')
+    ax4.set_xlabel('UTC')
+    plt.legend()
+    ax4.xaxis.set(major_formatter=formatter)
+    plt.setp(ax1.get_xticklabels(), visible=False) 
+    plt.setp(ax2.get_xticklabels(), visible=False) 
+    plt.setp(ax3.get_xticklabels(), visible=False) 
+    ax4.set_xlim(pltlim)
+    
+    plt.tight_layout()
+    if save == True:
+        if fig_path is None:
+            plt.savefig('/media/smrak/Eclipse2017/Eclipse/plots/cors/detrending/'+rx+'_'+str(sv)+'.png', dpi=300)
+        else:
+            plt.savefig(fig_path+rx+'_'+str(sv)+'.png', dpi=300)
+        plt.close(fig)
+    else:
+        plt.show()
+        plt.close(fig)
