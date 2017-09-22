@@ -58,7 +58,7 @@ def plotMap(latlim=[20, 65], lonlim=[-160, -70], center=[39, -86],
 ################################################################################
 
 ################################################################################
-def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], hdffile='test'):#,6,12,19,24,25]):
+def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], hdffilename='test'):#,6,12,19,24,25]):
     folder = '/media/smrak/Eclipse2017/Eclipse/cors/all/'
     el_mask = 40
     fs = int(decimate[1:])
@@ -71,16 +71,24 @@ def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], 
     # Get rxlist for the deay of eclipse
     rxlist = ec.getRxList(folder+str(233)+'/', sufix='*_30.17o')
     # Open HDF File to write
-    h5file = h5py.File('/media/smrak/Eclipse2017/Eclipse/hdf/'+hdffile+'.h5', 'w')
-    h5file.create_dataset('obstimes', data=time_array)
+    h5file = h5py.File('/media/smrak/Eclipse2017/Eclipse/hdf/'+hdffilename+'.h5', 'a')
+    try:
+        h5file.create_dataset('obstimes', data=time_array)
+    except:
+        pass
     # Iterate through stations in th elist
-    for rx in rxlist:
+    rxindex = np.arange(0, len(rxlist))
+    for rxi in rxindex:
+        rx = rxlist[rxi]
+        h5file = h5py.File('/media/smrak/Eclipse2017/Eclipse/hdf/'+hdffilename+'.h5', 'a')
+        print ('------------ '+ rx + " " + str(rxi) + ' out of ' + str(len(rxlist)) + ' ------------------')
         diff_tec = np.nan*np.zeros((len(time_array), len(sv)))
         lat = np.nan*np.zeros((len(time_array), len(sv)))
         lon = np.nan*np.zeros((len(time_array), len(sv)))
         residuals = np.nan*np.zeros((len(time_array), len(sv)))
-        
+
         gr = h5file.create_group(rx)
+
 #        if c >=100:
 #            h5file.close()
 #            break
@@ -132,13 +140,11 @@ def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], 
                             lat[idt,i] = lla[0]
                             lon[idt,i] = lla[1]
                             residuals[idt,i] = z
-#                            plt.figure()
-#                            plt.title(rx)
-#                            plt.plot(time_array, residuals, '.b')
+                            
                     except Exception as e:
-                        print (e)
+                        print ('Line 140: ',e)
                 except Exception as e:
-                    print (e)
+                    print ('Line 142: ', e)
                 # Reset time to th same day, round on 24 hours
             if len(tlist) == 2:
                 try:
@@ -149,11 +155,10 @@ def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], 
                     idt = np.where(np.isin(time_array, t[1]))[0]
                     diff_tec[idt,i] = tec2[1] - tec2[0]
                     
-#                    plt.figure()
-#                    plt.title(rx)
-#                    plt.plot(time_array, diff_tec, '.b')
                 except Exception as e:
-                    print (e)
+#                    break
+                    print ('Line 154: ', e)
+                    
             else:
                 print ('One day is missing for the receiver: ', rx)
         gr.create_dataset('lat', data=lat)
@@ -161,11 +166,11 @@ def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], 
         gr.create_dataset('res', data=residuals)
         gr.create_dataset('dtec', data=diff_tec)
         c+=1
-    h5file.close()
+        h5file.close()
 #-------------------------------------------------------------------------------
 #fig, ax, m = plotMap()
 def plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test1.h5', skip=2,
-               decimate=30, clim=[-0.25, 0.25], img='tec'):
+               decimate=30, clim=[-0.25, 0.25], img='tec', ms=10):
     data = h5py.File(file, 'r')
     time = np.array(data['obstimes'])
     
@@ -182,34 +187,56 @@ def plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test1.h5', skip=2,
     for i in iterate:
 #        if c >=50:
 #            break
-        fig, ax, m = plotMap(epoto=False, lonlim=[-140,-60])
+        fig, ax, m = plotMap(epoto=False, lonlim=[-140,-60], latlim=[15, 55])
         print('Plotting image '+str(c) +' of '+str(round(iterate.shape[0])))
         ci = 1
         for k in data.keys():
             if (k != 'obstimes'):
                 try:
-                    lat = np.array(data[k+'/lat'])
-                    lon = np.array(data[k+'/lon'])
+                    lat = np.array(data[k+'/lat'])[i]
+                    lon = np.array(data[k+'/lon'])[i]
                     if img == 'tec':
-                        z = np.array(data[k+'/dtec'])
+                        z = np.array(data[k+'/dtec'])[i]
                     else:
-                        z = np.array(data[k+'/res'])
-                    
+                        z = np.array(data[k+'/res'])[i]
+                    #Search for nearby, time shifted rows if the i-th row is empty
+                    idx = np.where(np.isfinite(lat))[0]
+                    if len(idx) == 0:
+                        try:
+                            tmp2 = np.array(data[k+'/lat'])[i-int(decimate/2) : int(i+decimate/2)]
+                            ix = np.where(np.isfinite(tmp2))[0]
+                            zero = int(decimate/2)
+                            
+                            if len(ix) > 0: 
+                                i_corrected = min(ix) -  zero
+                                lat = np.array(data[k+'/lat'])[i+i_corrected]
+                                lon = np.array(data[k+'/lon'])[i+i_corrected]
+                                if img == 'tec':
+                                    z = np.array(data[k+'/dtec'])[i+i_corrected]
+                                else:
+                                    z = np.array(data[k+'/res'])[i+i_corrected]
+                        
+                        except Exception as e:
+                            print ('line 219: ',e)
+
                     if ci == 1:
-                        plotScatterTEC(lat=lat[i], lon=lon[i], z=z[i], clim=clim, ax=ax, m=m, cmap='jet', cbar=True, aplha=0.9)
+                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', cbar=True, alpha=0.9, ms=ms)
                         ci += 1
                     else:
-                        plotScatterTEC(lat=lat[i], lon=lon[i], z=z[i], clim=clim, ax=ax, m=m, cmap='jet', alpha=0.9)
-                except:
+                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', alpha=0.9, ms=ms)
+                except Exception as e:
+#                    print ('line 227: ' + str(k) + 'Rx= ' '  Error: ' )
+#                    print (e)
                     pass
         try:
             ax.set_title('Time: '+tdt[c].strftime('%H:%M:%S') + ' UTC')
         except:
             pass
         fig.tight_layout()
-        fig.savefig('/media/smrak/Eclipse2017/Eclipse/pic/test113/'+str(time[i])+'.png' )
+        fig.savefig('/media/smrak/Eclipse2017/Eclipse/pic/dtec/'+str(time[i])+'.png' )
         plt.close(fig)
         c+=1
 #_______________________________________________________________________________
-#convertCORS2HDF(sv=[2,5,6,12,19,24,25], hdffile='test3')
-plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test2.h5', clim=[-5,5], img='tec')
+convertCORS2HDF(sv=[2,5,6,12,17,19,24,25], hdffilename='test_44')
+#plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test4.h5', img='tec', clim=[-5,5], skip=3) #, clim=[-0.25,0.25]
+#plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test4.h5', img='res', skip=3) #, clim=[-0.25,0.25]

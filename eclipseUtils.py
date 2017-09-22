@@ -252,7 +252,7 @@ def _alignTimes(tlist, teclist, polylist, residuallist, fs):
 def getRxList(folder, sufix):
 #    wlstr = '*_15.17o'
     filestr = os.path.join(folder,sufix)
-    flist = glob.glob(filestr)
+    flist = sorted(glob.glob(filestr))
     rx = []
     for f in flist:
         head, tail = os.path.split(f)
