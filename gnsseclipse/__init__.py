@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
 """
 Created on Mon Sep  4 14:42:15 2017
 
 @author: Sebastijan Mrak <smrak@gmail.com>
 """
-
+from pathlib import Path
 from scipy import signal
 import numpy as np
 import os
@@ -16,13 +15,16 @@ import yaml
 import h5py
 from mpl_toolkits.basemap import Basemap
 from gsit import pyGps
-import matplotlib.pyplot as plt
+from matplotlib.pyplot import figure,show,close,subplots
 import matplotlib.dates as mdates
+#
+DETOUT = Path('~/Eclipse2017/Eclipse/plots/cors/detrending/').expanduser()
+CORSOUT = Path('~/Eclipse2017/Eclipse/plots/cors/run4/').expanduser()
 
-def butter_hpf(highcut, fs, order):
+def butter_hpf(highcut, fs, order, plot=False):
     """
     Sebastijan Mrak
-    Design the Butterwoth response highpass filter with N-th order and 
+    Design the Butterwoth response highpass filter with N-th order and
     3db cutoff frequency 'highcut' in Hz.
     Output are the poles 'b' and zeroes 'a' of the filter
     """
@@ -30,14 +32,17 @@ def butter_hpf(highcut, fs, order):
     high = highcut / nyq
     b, a = signal.butter(order, high, btype='highpass')
     w, h = signal.freqz(b, a, worN=1000)
-#    plt.figure()
-#    plt.plot((fs * 0.5 / np.pi) * w, abs(h))
+    if plot:
+        ax = figure().gca()
+        ax.plot((fs * 0.5 / np.pi) * w, abs(h))
+
     return b, a
 
-def butter_lpf(fc, fs, order):
+
+def butter_lpf(fc, fs, order, plot=False):
     """
     Sebastijan Mrak
-    Design the Butterwoth response highpass filter with N-th order and 
+    Design the Butterwoth response highpass filter with N-th order and
     3db cutoff frequency 'highcut' in Hz.
     Output are the poles 'b' and zeroes 'a' of the filter
     """
@@ -45,8 +50,10 @@ def butter_lpf(fc, fs, order):
     high = fc / nyq
     b, a = signal.butter(order, high, btype='lowpass', analog=False)
     w, h = signal.freqz(b, a, worN=1000)
-#    plt.figure()
-#    plt.plot((fs * 0.5 / np.pi) * w, abs(h))
+    if plot:
+        ax = figure().gca()
+        ax.plot((fs * 0.5 / np.pi) * w, abs(h))
+
     return b, a
 
 
@@ -58,16 +65,20 @@ def bpf(y, lowcut, highcut, fs=1, order=5):
     w, h = signal.freqz(b, a, worN=1000)
     gd = -np.diff(np.unwrap(np.angle(h)))/np.diff(w)
     y_filt = signal.lfilter(b, a, y)
-    return y_filt , gd   
+
+    return y_filt , gd
+
 
 def hpf(y, fc=0.1, order=5, fs=1):
     """
     Sebastijan Mrak
-    Filter the input data 'y' with desired HP filter.  
+    Filter the input data 'y' with desired HP filter.
     """
     b, a = butter_hpf(fc, fs, order)
     y_filt = signal.lfilter(b, a, y)
+
     return y_filt
+
 
 def lpf(y, fc=0.1, order=5, fs=1, plot=False, group_delay=False):
     b, a = butter_lpf(fc, fs, order)
@@ -76,40 +87,44 @@ def lpf(y, fc=0.1, order=5, fs=1, plot=False, group_delay=False):
     gd = -np.diff(np.unwrap(np.angle(h)))/np.diff(w)
     print ('Group delay of the filter is '+ str(gd[1])+' samples.')
     if plot:
-        plt.figure()
-        plt.plot((fs * 0.5 / np.pi) * w, abs(h))
-        plt.semilogx(w, 20 * np.log10(np.abs(h)))
-        plt.ylim([-20,5])
-        plt.xlim([0, fs/2])
-        plt.title('Magnitude-normalized Bessel filter frequency response')
-        plt.xlabel('Frequency [Hz]')
-        plt.ylabel('Amplitude [dB]')
-        plt.grid(which='both', axis='both')
+        ax = figure().gca()
+        ax.plot((fs * 0.5 / np.pi) * w, abs(h))
+        ax.semilogx(w, 20 * np.log10(np.abs(h)))
+        ax.set_ylim([-20,5])
+        ax.set_xlim([0, fs/2])
+        ax.set_title('Magnitude-normalized Bessel filter frequency response')
+        ax.set_xlabel('Frequency [Hz]')
+        ax.set_ylabel('Amplitude [dB]')
+        ax.grid(which='both', axis='both')
         ################################################
-    
-        plt.figure()
-        plt.semilogx(w[1:], gd)
-        plt.title('LPF group delay')
-        plt.xlabel('Frequency [radians / second]')
-        plt.ylabel('Group delay [samples]')
-        plt.margins(0, 0.1)
-        plt.grid(which='both', axis='both')
+
+        ax = figure().gca()
+        ax.semilogx(w[1:], gd)
+        ax.set_title('LPF group delay')
+        ax.set_xlabel('Frequency [radians / second]')
+        ax.set_ylabel('Group delay [samples]')
+        ax.margins(0, 0.1)
+        ax.grid(which='both', axis='both')
+
     if group_delay:
         return y_filt, gd[1]
     else:
         return y_filt
+
 
 def polynom(y, order=3):
         x = range(y.shape[0])
         z = np.polyfit(x, y, order)
         f = np.poly1d(z)
         y_new = f(x)
+
         return y_new
-    
+
 def correctSampling(t, y, fs=1):
     ts = pyGps.datetime2posix(t)
     td = np.diff(ts)
     idt = np.where(td != fs)[0]
+
     if idt.shape[0] > 0:
         while True:
             td = np.diff(ts)
@@ -118,14 +133,17 @@ def correctSampling(t, y, fs=1):
                 break
             ts = np.insert(ts, idt[0]+1, ts[idt[0]]+fs)
             y = np.insert(y, idt[0]+1, np.NaN)
-            
+
     return ts, y
+
 
 def returnSlope(t,y, fs=5, interval=5):
     skip = int(60/fs) * interval
     t_new = t[::skip]
     slope = np.diff(y[::skip])
+
     return t_new[:-1], slope
+
 
 def getPhaseCorrTECGLONASS(L1,L2,P1,P2,fN):
     f1 = (1602 + fN*0.5625) * 1000000
@@ -133,18 +151,19 @@ def getPhaseCorrTECGLONASS(L1,L2,P1,P2,fN):
     c0 = 3E8
     range_tec = ((f1**2 * f2**2) / (f1**2 - f2**2)) * (P2 - P1) / 40.3 / pow(10, 16)
     phase_tec = ((f1**2 * f2**2) / (f1**2 - f2**2)) * (c0/40.3) * (L1 / f1 - L2 / f2) / pow(10, 16)
-    
+
     tec_difference = np.array(sorted(phase_tec-range_tec))
-            
+
     tec_difference = tec_difference[np.isfinite(tec_difference)]
     median_difference = tec_difference[int(len(tec_difference)/2)]
 #    difference_width = tec_difference[int(len(tec_difference)*.75)]-tec_difference[int(len(tec_difference)*.25)]
 #    median_error = difference_width/np.sqrt(len(tec_difference))
     tec = phase_tec - median_difference
-    
+
     return tec
-    
-def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_seconds=18, 
+
+
+def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_seconds=18,
               alt=300, sattype='G', el=False, lla=False, vertical=False, svbias=False, fN=0):
     obstimes = np.array((data.major_axis))
     obstimes = pandas.to_datetime(obstimes) - datetime.timedelta(seconds=leap_seconds)
@@ -185,9 +204,9 @@ def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_second
             else:
                 tec = pyGps.getPhaseCorrTEC(L1[idel],L2[idel],C1[idel],C2[idel])
                 tec = pyGps.getVerticalTEC(tec, aer[1][idel], alt)
-                
+
         t = t[idel]
-        
+
         #Return time, TEC and respective third argumnet masked by an elavation mask angle
         if el==False and lla==False:
             return t, tec
@@ -197,14 +216,15 @@ def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_second
             return t, tec, llt[:,idel]
         else:
             return t, tec, aer[:,idel]
-            
-            
+
+
     else:
         L1 = np.array(data['L1', sv, :, 'data'])
         L2 = np.array(data['L2', sv, :, 'data'])
         C1 = np.array(data['C1', sv, :, 'data'])
         C2 = np.array(data['P2', sv, :, 'data'])
-################################################################################
+
+# %% ################################################################################
 def getIntervals(y, maxgap=1, maxjump=0.5):
     r = np.array(range(len(y)))
     idx = np.isfinite(y)
@@ -212,7 +232,7 @@ def getIntervals(y, maxgap=1, maxjump=0.5):
     intervals=[]
     if len(r)==0:
         return idx, intervals
-    
+
     beginning=r[0]
     last=r[0]
     for i in r[1:]:
@@ -222,8 +242,9 @@ def getIntervals(y, maxgap=1, maxjump=0.5):
         last=i
         if i==r[-1]:
             intervals.append([beginning,last])
+
     return idx, intervals
-################################################################################
+# %% ################################################################################
 def _alignTimes(tlist, teclist, polylist, residuallist, fs):
     tmin = []
     tmax = []
@@ -232,7 +253,7 @@ def _alignTimes(tlist, teclist, polylist, residuallist, fs):
         tmax.append(tlist[i].max())
     tstart = max(pyGps.datetime2posix(tmin))
     tend = min(pyGps.datetime2posix(tmax))
-    
+
     t = []
     tec2 = []
     poly2 = []
@@ -247,6 +268,7 @@ def _alignTimes(tlist, teclist, polylist, residuallist, fs):
         tec2.append(tec1[idt])
         poly2.append(poly1[idt])
         res2.append(res1[idt])
+
     return t, tec2, poly2, res2
 ################################################################################
 def getRxList(folder, sufix):
@@ -257,44 +279,46 @@ def getRxList(folder, sufix):
     for f in flist:
         head, tail = os.path.split(f)
         rx.append(tail[0:4])
+
     return rx
 ################################################################################
 def createTimeArray(timelim):
     ts = pyGps.datetime2posix(timelim)
     t = range(int(ts[0]), int(ts[1])+1)
+
     return np.array(t)
 ################################################################################
 def _plotLOS(tlist, teclist, polylist, residuallist, rx='', sv=0, save=False,
-             fig_path=None,
+             fig_path=CORSOUT,
              pltlim = [datetime.datetime(2017,8,21,16,0,0), datetime.datetime(2017,8,21,21,0,0)]):
-    
-    fig = plt.figure(figsize=(12,8))
+
+    fig = figure(figsize=(12,8))
     tdt = [datetime.datetime.utcfromtimestamp(i) for i in tlist[1]]
     formatter = mdates.DateFormatter('%H:%M')
-    
+
     ax1 = fig.add_subplot(411)
     ax2 = fig.add_subplot(412, sharex=ax1)
     ax3 = fig.add_subplot(413, sharex=ax1)
     ax4 = fig.add_subplot(414, sharex=ax1)
-    
+
     ax1.plot(tdt, teclist[0], 'b')
     ax1.plot(tdt, polylist[0], 'r')
     ax1.plot(tdt, teclist[1], 'b')
     ax1.plot(tdt, polylist[1], 'r')
-    
+
     ax2.plot(tdt, residuallist[0], 'g')
     ax2.plot(tdt, residuallist[1], 'm')
     ax2.plot( [tdt[0], tdt[-1]], [0,0], '--k')
-    
+
     ax3.plot(tdt, polylist[0], 'r')
     ax3.plot(tdt, teclist[1], 'b')
 
     ax4.plot(tdt, teclist[1]-polylist[0], 'm')
-    
-    plt.setp(ax1.get_xticklabels(), visible=False) 
-    plt.setp(ax2.get_xticklabels(), visible=False) 
-    plt.setp(ax3.get_xticklabels(), visible=False) 
-    
+
+    ax1.tick_params(labelbottom='off')
+    ax2.tick_params(labelbottom='off')
+    ax3.tick_params(labelbottom='off')
+
     ax4.grid(axis='y')
     ax2.grid(axis='y')
     ax1.set_title(rx+' - sv: '+str(sv))
@@ -306,18 +330,18 @@ def _plotLOS(tlist, teclist, polylist, residuallist, rx='', sv=0, save=False,
     ax3.set_xlim(pltlim)
     ax4.xaxis.set(major_formatter=formatter)
     ax2.set_ylim([-0.5, 0.5])
-    plt.tight_layout()
+    fig.tight_layout()
     if save == True:
-        if fig_path is None:
-            plt.savefig('/media/smrak/Eclipse2017/Eclipse/plots/cors/run4/'+rx+'_'+str(sv)+'.png', dpi=300)
-        else:
-            plt.savefig(fig_path+rx+'_'+str(sv)+'.png', dpi=300)
-        plt.close(fig)
-    else:
-        plt.show()
+        ofn = fig_path / f'{rx}_{sv}.png'
 
-            
-            
+        print('saving',ofn)
+        fig.savefig(str(ofn), dpi=300)
+        close(fig)
+    else:
+        show()
+
+
+
 def _plotEclipseMap(filepath='totality.h5'):
     data = h5py.File(filepath, 'r')
     center_lat = np.array(data['path/center_lat'])
@@ -326,8 +350,8 @@ def _plotEclipseMap(filepath='totality.h5'):
     north_lon = np.array(data['path/north_lon'])
     south_lat = np.array(data['path/south_lat'])
     south_lon = np.array(data['path/south_lon'])
-    
-    (fig,ax) = plt.subplots(1,1,figsize=(16,12),facecolor='w')
+
+    (fig,ax) = subplots(1,1,figsize=(16,12),facecolor='w')
     latlim2 = [33, 38]
     lonlim2 = [-95, -75]
     m = Basemap(projection='merc',
@@ -338,94 +362,96 @@ def _plotEclipseMap(filepath='totality.h5'):
     m.drawcoastlines()
     m.drawstates()
     m.drawcountries()
-    
+
     X,Y = m(center_lon, center_lat)
     X1,Y1 = m(north_lon, north_lat)
     X2,Y2 = m(south_lon, south_lat)
     m.plot(X,Y, c='r')
     m.plot(X1,Y1, c='b')
     m.plot(X2,Y2, c='b')
-    plt.show()
-    
-def _plotDetrending(t, z, sv='',rx=None,order=[],save=False,fig_path=None, 
+    show()
+
+def _plotDetrending(t, z, sv='',rx=None,order=[],save=False, fig_path=DETOUT,
                     pltlim = [datetime.datetime(2017,8,21,17,0,0), datetime.datetime(2017,8,21,21,0,0)]):
-    
-    fig = plt.figure(figsize=(12,8))
+
+    fig = figure(figsize=(12,8))
     formatter = mdates.DateFormatter('%H:%M')
     axs = []
 #    plt.title(rx+' - sv: '+str(sv))
     for i in range(len(z)):
         ax = fig.add_subplot(len(z),1,i+1)
         axs.append(ax)
-        plt.setp(ax.get_xticklabels(), visible=False) 
-        plt.plot(t, z[i], label=order[i])
-        plt.plot( [pltlim[0], pltlim[-1]], [0,0], '--k')
-        plt.ylim([-0.8, 0.6])
-        plt.legend()
+        ax.tick_params(labelbottom='off')
+        ax.plot(t, z[i], label=order[i])
+        ax.plot( [pltlim[0], pltlim[-1]], [0,0], '--k')
+        ax.set_ylim([-0.8, 0.6])
+        ax.legend()
         ax.set_ylabel('residuals')
         ax.grid(axis='y')
         ax.set_xlim(pltlim)
     ax.xaxis.set(major_formatter=formatter)
-    plt.setp(ax.get_xticklabels(), visible=True)
+    ax.tick_params(labelbottom='on')
     ax.set_xlabel('UTC')
     axs[0].set_title(rx+' - sv: '+str(sv))
-    plt.tight_layout()
-    
+    fig.tight_layout()
+
     if save == True:
-        if fig_path is None:
-            plt.savefig('/media/smrak/Eclipse2017/Eclipse/plots/cors/detrending/orders_'+rx+'_'+str(sv)+'.png', dpi=300)
-        else:
-            plt.savefig(fig_path+rx+'_'+str(sv)+'.png', dpi=300)
-        plt.close(fig)
+        fig_path = Path(fig_path).expanduser()
+        ofn = fig_path / f'{rx}_{sv}.png'
+
+        print('saving',ofn)
+        fig.savefig(str(ofn), dpi=300)
+        close(fig)
     else:
-        plt.show()
-        plt.close(fig)
-    
-    
-def _plotResidualsTEC(t,vtec,stec,residuallist1,residuallist2,sv='',rx=None,order=[],save=False,fig_path=None,
+        show()
+        close(fig)
+
+
+def _plotResidualsTEC(t,vtec,stec,residuallist1,residuallist2,sv='',rx=None,order=[],save=False, fig_path=DETOUT,
                    pltlim = [datetime.datetime(2017,8,21,17,0,0), datetime.datetime(2017,8,21,21,0,0)]):
-    fig = plt.figure(figsize=(12,8))
+    fig = figure(figsize=(12,8))
     formatter = mdates.DateFormatter('%H:%M')
-    
+
     ax1 = fig.add_subplot(411)
     ax2 = fig.add_subplot(412, sharex=ax1)
     ax3 = fig.add_subplot(413, sharex=ax1)
     ax4 = fig.add_subplot(414, sharex=ax1)
-    
+
     ax1.plot(t, stec, 'b')
-    
+
     for i in range(len(residuallist1)):
         ax2.plot(t,residuallist1[i], label = order[i])
     ax2.plot( [t[0], t[-1]], [0,0], '--k')
     ax2.grid(axis='y')
-    
+
     ax3.plot(t, vtec, 'b')
-    
+
     for i in range(len(residuallist1)):
         ax4.plot(t,residuallist2[i], label = order[i])
     ax4.plot( [t[0], t[-1]], [0,0], '--k')
     ax4.grid(axis='y')
-    
+
     ax1.set_title(rx+' - sv: '+str(sv))
     ax1.set_ylabel('sTEC')
     ax2.set_ylabel('residuals')
     ax3.set_ylabel('vTEC')
     ax4.set_ylabel('residuals')
     ax4.set_xlabel('UTC')
-    plt.legend()
+    ax4.legend()
     ax4.xaxis.set(major_formatter=formatter)
-    plt.setp(ax1.get_xticklabels(), visible=False) 
-    plt.setp(ax2.get_xticklabels(), visible=False) 
-    plt.setp(ax3.get_xticklabels(), visible=False) 
+    ax1.tick_params(labelbottom='off')
+    ax2.tick_params(labelbottom='off')
+    ax3.tick_params(labelbottom='off')
     ax4.set_xlim(pltlim)
-    
-    plt.tight_layout()
+
+    fig.tight_layout()
     if save == True:
-        if fig_path is None:
-            plt.savefig('/media/smrak/Eclipse2017/Eclipse/plots/cors/detrending/'+rx+'_'+str(sv)+'.png', dpi=300)
-        else:
-            plt.savefig(fig_path+rx+'_'+str(sv)+'.png', dpi=300)
-        plt.close(fig)
+        fig_path = Path(fig_path).expanduser()
+        ofn = fig_path / f'{rx}_{sv}.png'
+
+        print('saving',ofn)
+        fig.savefig(str(ofn), dpi=300)
+        close(fig)
     else:
-        plt.show()
-        plt.close(fig)
+        show()
+        close(fig)
