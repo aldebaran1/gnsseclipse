@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 ALLDIR = Path('~/Eclipse2017/Eclipse/cors/all/').expanduser()
 OBSOUT = Path('~/Eclipse2017/Eclipse/hdf/').expanduser()
 NAVDIR = Path('~/Eclipse2017/Eclipse/nav/jplm').expanduser()
+TOTFN = Path('~/Documents/eclipse/totality.h5').expanduser()
+PICDIR = Path('~/Eclipse2017/Eclipse/pic/dtec/').expanduser()
 
 def plotScatterTEC(lat=[], lon=[], z=[], ms=15, color='k', alpha=0.6,
                          ax=None, m=None, clim=None, cmap='jet', cbar=False):
@@ -34,11 +36,11 @@ def plotMap(latlim=[20, 65], lonlim=[-160, -70], center=[39, -86],
             meridians = [-120,-110, -100, -90, -80,-70],
             epoto=False):
 
-    totality_path = h5py.File('/home/smrak/Documents/eclipse/totality.h5', 'r')
-    north_lat = np.array(totality_path['path/north_lat'])
-    north_lon = np.array(totality_path['path/north_lon'])
-    south_lat = np.array(totality_path['path/south_lat'])
-    south_lon = np.array(totality_path['path/south_lon'])
+    with h5py.File(TOTFN, 'r') as f:
+        north_lat = f['path/north_lat'].value
+        north_lon = f['path/north_lon'].value
+        south_lat = f['path/south_lat'].value
+        south_lon = f['path/south_lon'].value
 
     (fig,ax) = plt.subplots(1,1,facecolor='w', figsize=(12,8))
     m = Basemap(lat_0=40, lon_0=-95,llcrnrlat=latlim[0],urcrnrlat=latlim[1],
@@ -170,17 +172,19 @@ def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], 
 
 #-------------------------------------------------------------------------------
 #fig, ax, m = plotMap()
-def plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test1.h5', skip=2,
+def plotTecMap(file=OBSOUT / 'test1.h5', skip=2,
                decimate=30, clim=[-0.25, 0.25], img='tec', ms=10):
-    data = h5py.File(file, 'r')
-    time = np.array(data['obstimes'])
 
-    for k in data.keys():
-        try:
-            lat_dumb = np.array(data[k+'/lat'])
-            break
-        except Exception:
-            pass
+    with h5py.File(file, 'r') as f:
+        time = f['obstimes'][:]
+
+        for k in f.keys():
+            try:
+                lat_dumb = f[k+'/lat'].value
+                break
+            except Exception:
+                pass
+
     idt = np.where(np.isfinite(lat_dumb))[0]
     iterate = np.arange(idt.min(),idt.max()+1,decimate*skip)
     tdt = [datetime.datetime.utcfromtimestamp(i) for i in time[iterate]]
@@ -191,51 +195,52 @@ def plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test1.h5', skip=2,
         fig, ax, m = plotMap(epoto=False, lonlim=[-140,-60], latlim=[15, 55])
         print('Plotting image '+str(c) +' of '+str(round(iterate.shape[0])))
         ci = 1
-        for k in data.keys():
-            if (k != 'obstimes'):
-                try:
-                    lat = np.array(data[k+'/lat'])[i]
-                    lon = np.array(data[k+'/lon'])[i]
-                    if img == 'tec':
-                        z = np.array(data[k+'/dtec'])[i]
-                    else:
-                        z = np.array(data[k+'/res'])[i]
-                    #Search for nearby, time shifted rows if the i-th row is empty
-                    idx = np.where(np.isfinite(lat))[0]
-                    if len(idx) == 0:
-                        try:
-                            tmp2 = np.array(data[k+'/lat'])[i-int(decimate/2) : int(i+decimate/2)]
-                            ix = np.where(np.isfinite(tmp2))[0]
-                            zero = int(decimate/2)
+        with h5py.File(file, 'r') as f:
+            for k in f.keys():
+                if (k != 'obstimes'):
+                    try:
+                        lat = f[k+'/lat'][i]
+                        lon = f[k+'/lon'][i]
+                        if img == 'tec':
+                            z = f[k+'/dtec'][i]
+                        else:
+                            z = f[k+'/res'][i]
+                        #Search for nearby, time shifted rows if the i-th row is empty
+                        idx = np.where(np.isfinite(lat))[0]
+                        if len(idx) == 0:
+                            try:
+                                tmp2 = f[k+'/lat'][i-int(decimate/2) : int(i+decimate/2)]
+                                ix = np.where(np.isfinite(tmp2))[0]
+                                zero = int(decimate/2)
 
-                            if len(ix) > 0:
-                                i_corrected = min(ix) -  zero
-                                lat = np.array(data[k+'/lat'])[i+i_corrected]
-                                lon = np.array(data[k+'/lon'])[i+i_corrected]
-                                if img == 'tec':
-                                    z = np.array(data[k+'/dtec'])[i+i_corrected]
-                                else:
-                                    z = np.array(data[k+'/res'])[i+i_corrected]
+                                if len(ix) > 0:
+                                    i_corrected = min(ix) -  zero
+                                    lat = f[k+'/lat'][i+i_corrected]
+                                    lon = f[k+'/lon'][i+i_corrected]
+                                    if img == 'tec':
+                                        z = f[k+'/dtec'][i+i_corrected]
+                                    else:
+                                        z = f[k+'/res'][i+i_corrected]
 
-                        except Exception as e:
-                            print ('line 219: ',e, file=stderr)
+                            except Exception as e:
+                                print ('line 219: ',e, file=stderr)
 
-                    if ci == 1:
-                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', cbar=True, alpha=0.9, ms=ms)
-                        ci += 1
-                    else:
-                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', alpha=0.9, ms=ms)
-                except Exception as e:
-#                    print ('line 227: ' + str(k) + 'Rx= ' '  Error: ' )
-#                    print (e)
-                    pass
+                        if ci == 1:
+                            plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', cbar=True, alpha=0.9, ms=ms)
+                            ci += 1
+                        else:
+                            plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', alpha=0.9, ms=ms)
+                    except Exception as e:
+    #                    print ('line 227: ' + str(k) + 'Rx= ' '  Error: ' )
+    #                    print (e)
+                        pass
         try:
             ax.set_title('Time: '+tdt[c].strftime('%H:%M:%S') + ' UTC')
         except Exception:
             pass
 
         fig.tight_layout()
-        fig.savefig('/media/smrak/Eclipse2017/Eclipse/pic/dtec/'+str(time[i])+'.png' )
+        fig.savefig(str(PICDIR / f'{time[i]}.png' ))
         plt.close(fig)
         c+=1
 #_______________________________________________________________________________
