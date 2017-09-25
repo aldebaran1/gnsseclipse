@@ -7,8 +7,6 @@ Created on Mon Sep  4 14:42:15 2017
 from pathlib import Path
 from scipy import signal
 import numpy as np
-import os
-import glob
 import datetime
 import pandas
 import yaml
@@ -273,12 +271,12 @@ def _alignTimes(tlist, teclist, polylist, residuallist, fs):
 ################################################################################
 def getRxList(folder, sufix):
 #    wlstr = '*_15.17o'
-    filestr = os.path.join(folder,sufix)
-    flist = sorted(glob.glob(filestr))
+    folder = Path(folder).expanduser()
+    filestr = folder.glob(sufix)
+    flist = sorted(filestr)
     rx = []
     for f in flist:
-        head, tail = os.path.split(f)
-        rx.append(tail[0:4])
+        rx.append(f.suffix[:4])
 
     return rx
 ################################################################################
