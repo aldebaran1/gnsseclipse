@@ -149,7 +149,7 @@ def lpf(y, fc=0.1, order=5, fs=1, plot=False, group_delay=False):
         return y_filt, gd[1]
     else:
         return y_filt
-    
+#------------------------------------------------------------------------------#
 def interpolateLatLon(lat, lon, order = 3, resolution=0.1):
     z = np.polyfit(lon, lat, order)
     f = np.poly1d(z)
@@ -184,7 +184,133 @@ def returnSlope(t,y, fs=5, interval=5):
     t_new = t[::skip]
     slope = np.diff(y[::skip])
     return t_new[:-1], slope
-
+#------------------------------------------------------------------------------#
+def getIntervals(y, maxgap=1, maxjump=0.5):
+    r = np.array(range(len(y)))
+    idx = np.isfinite(y)
+    r = r[idx]
+    intervals=[]
+    if len(r)==0:
+        return intervals
+    
+    beginning = 0
+    last = 0
+#    print (r)
+    for i in range(len(r)):
+#        print (i,r[i], last)
+#        print ('-------------------')
+        if (r[i]-r[last] > maxgap) or (abs(y[i] - y[last]) > maxjump):
+            intervals.append((r[beginning],r[last]))
+            beginning=i
+        last=i
+        if r[i]==r[-1]:
+            intervals.append([r[beginning],r[last]])
+            break
+    return intervals
+################################################################################
+def _alignTimes(tlist, teclist, polylist, residuallist, fs):
+    tmin = []
+    tmax = []
+    for i in range(len(tlist)):
+        tmin.append(tlist[i].min())
+        tmax.append(tlist[i].max())
+    tstart = max(pyGps.datetime2posix(tmin))
+    tend = min(pyGps.datetime2posix(tmax))
+    
+    t = []
+    tec2 = []
+    poly2 = []
+    res2 = []
+    for i in range(len(teclist)):
+        tt, tec1 = correctSampling(tlist[i], teclist[i], fs=fs)
+        tt, poly1 = correctSampling(tlist[i], polylist[i], fs=fs)
+        tt, res1 = correctSampling(tlist[i], residuallist[i], fs=fs)
+        tt = np.array(tt)
+        idt = np.where((tt>=tstart) & (tt<=tend))[0]
+        t.append(tt[idt])
+        tec2.append(tec1[idt])
+        poly2.append(poly1[idt])
+        res2.append(res1[idt])
+    return t, tec2, poly2, res2
+################################################################################
+def getRxList(folder, sufix):
+#    wlstr = '*_15.17o'
+    filestr = os.path.join(folder,sufix)
+    flist = sorted(glob.glob(filestr))
+    rx = []
+    for f in flist:
+        head, tail = os.path.split(f)
+        rx.append(tail[0:4])
+    return rx
+################################################################################
+def createTimeArray(timelim):
+    ts = pyGps.datetime2posix(timelim)
+    t = range(int(ts[0]), int(ts[1])+1)
+    return np.array(t)
+################################################################################
+def returnTotalityPath(width=False):
+    data = h5py.File('totality.h5', 'r')
+    time = np.array(data['path/time'])
+    center_lat = np.array(data['path/center_lat'])
+    center_lon = np.array(data['path/center_lon'])
+    north_lat = np.array(data['path/north_lat'])
+    north_lon = np.array(data['path/north_lon'])
+    south_lat = np.array(data['path/south_lat'])
+    south_lon = np.array(data['path/south_lon'])
+    
+    if not width:
+        return time, center_lat, center_lon
+    else:
+        return time, [center_lat, north_lat, south_lat], [center_lon, north_lon, south_lon]
+################################################################################
+def EuclidDistance(lon1, lat1, lon2, lat2):
+    yy = (lat1-lat2) * 111 # in km for LAT diff
+    xx = (lon1-lon2) * 111 / np.cos(np.radians(lat2)) #In km with lat angle correction
+    distance = np.sqrt( pow(xx,2) + pow(yy,2))
+    if lat2 > lat1:
+        return -distance, xx, yy
+    else:
+        return distance, xx, yy
+################################################################################
+def getToatlityTouch(totality, los):
+    euclid_dist = []
+    errX = []
+    Ix = []
+    Tt = totality[0]
+    Tipp = los[0]
+    for i in range(len(Tt)):
+        Ts = Tt[i]
+        j = abs(Ts - Tipp).argmin()
+        ed, ex, ey = EuclidDistance(totality[2][i], totality[1][i], los[2][j], los[1][j])
+        euclid_dist.append(ed)
+        errX.append(ex)
+        Ix.append(j)
+    ixe = abs(np.array(euclid_dist)).argmin()
+    ix = Ix[ixe-1]
+    return ix, np.array(euclid_dist), errX
+################################################################################
+def getPolynomOrder(interval, Ts, weights=[2,3,7,10]):
+    lst_len = (interval[1] - interval[0]) * Ts / 60 # In minutes
+    
+    if lst_len < 20:
+        polynom_order = weights[0]
+    elif lst_len >= 20 and lst_len < 50:
+        polynom_order = weights[1]
+    elif lst_len >= 50 and lst_len < 100:
+        polynom_order = weights[2]
+    elif lst_len >= 100:
+        polynom_order = weights[3]
+    return polynom_order
+################################################################################
+def resBPFFilter(t, y, Ts=30):
+    bpf_res = np.nan*np.ones(y.shape[0])
+    idx = np.where(np.isfinite(y))[0]
+    tmp_res, gd = bpf(y[idx], 0.0001, 0.002, fs=1/30, order=5)
+    bpf_res[idx] = tmp_res
+    bpf_td = np.array(t) - datetime.timedelta(seconds=9*Ts)
+    
+    return bpf_td, bpf_res
+################################################################################
 def getPhaseCorrTECGLONASS(L1,L2,P1,P2,fN):
     f1 = (1602 + fN*0.5625) * 1000000
     f2 = (1246 + fN*0.4375) * 1000000
@@ -306,83 +432,7 @@ def getResiduals(rxlist=['mobu'],decimate='_30',sv=2,day=233,Ts=30,el_mask=20,po
     else:
         return time, res
 ################################################################################
-def getIntervals(y, maxgap=1, maxjump=0.5):
-    r = np.array(range(len(y)))
-    idx = np.isfinite(y)
-    r = r[idx]
-    intervals=[]
-    if len(r)==0:
-        return intervals
-    
-    beginning = 0
-    last = 0
-#    print (r)
-    for i in range(len(r)):
-#        print (i,r[i], last)
-#        print ('-------------------')
-        if (r[i]-r[last] > maxgap) or (abs(y[i] - y[last]) > maxjump):
-            intervals.append((r[beginning],r[last]))
-            beginning=i
-        last=i
-        if r[i]==r[-1]:
-            intervals.append([r[beginning],r[last]])
-            break
-    return intervals
-################################################################################
-def _alignTimes(tlist, teclist, polylist, residuallist, fs):
-    tmin = []
-    tmax = []
-    for i in range(len(tlist)):
-        tmin.append(tlist[i].min())
-        tmax.append(tlist[i].max())
-    tstart = max(pyGps.datetime2posix(tmin))
-    tend = min(pyGps.datetime2posix(tmax))
-    
-    t = []
-    tec2 = []
-    poly2 = []
-    res2 = []
-    for i in range(len(teclist)):
-        tt, tec1 = correctSampling(tlist[i], teclist[i], fs=fs)
-        tt, poly1 = correctSampling(tlist[i], polylist[i], fs=fs)
-        tt, res1 = correctSampling(tlist[i], residuallist[i], fs=fs)
-        tt = np.array(tt)
-        idt = np.where((tt>=tstart) & (tt<=tend))[0]
-        t.append(tt[idt])
-        tec2.append(tec1[idt])
-        poly2.append(poly1[idt])
-        res2.append(res1[idt])
-    return t, tec2, poly2, res2
-################################################################################
-def getRxList(folder, sufix):
-#    wlstr = '*_15.17o'
-    filestr = os.path.join(folder,sufix)
-    flist = sorted(glob.glob(filestr))
-    rx = []
-    for f in flist:
-        head, tail = os.path.split(f)
-        rx.append(tail[0:4])
-    return rx
-################################################################################
-def createTimeArray(timelim):
-    ts = pyGps.datetime2posix(timelim)
-    t = range(int(ts[0]), int(ts[1])+1)
-    return np.array(t)
-################################################################################
-def returnTotalityPath(width=False):
-    data = h5py.File('totality.h5', 'r')
-    time = np.array(data['path/time'])
-    center_lat = np.array(data['path/center_lat'])
-    center_lon = np.array(data['path/center_lon'])
-    north_lat = np.array(data['path/north_lat'])
-    north_lon = np.array(data['path/north_lon'])
-    south_lat = np.array(data['path/south_lat'])
-    south_lon = np.array(data['path/south_lon'])
-    
-    if not width:
-        return time, center_lat, center_lon
-    else:
-        return time, [center_lat, north_lat, south_lat], [center_lon, north_lon, south_lon]
+
 ################################################################################
 def _plotLOS(tlist, teclist, polylist, residuallist, rx='', sv=0, save=False,
              fig_path=None,
