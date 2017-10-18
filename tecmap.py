@@ -15,26 +15,25 @@ from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-def plotScatterTEC(lat=[], lon=[], z=[], ms=15, color='k', alpha=0.6,
+def plotScatterTEC(lat=[], lon=[], z=[], ms=10, color='k', alpha=0.6,
                          ax=None, m=None, clim=None, cmap='jet', cbar=False):
-    if len(lat) > 0 and len(lon) > 0:
+    if isinstance(lat, np.ndarray) and isinstance(lon, np.ndarray):
+        if len(lat) > 0 and len(lon) > 0:
+            x,y = m(lon, lat)
+            a = m.scatter(x, y, c=z, cmap=cmap, alpha=alpha, s=ms)
+            a.set_clim(clim)
+            if cbar == True:
+                plt.colorbar(a)
+    else:
         x,y = m(lon, lat)
-        a = m.scatter(x, y, c=z, cmap=cmap, alpha=alpha)
-        a.set_clim(clim)
-        if cbar == True:
-            plt.colorbar(a)
+        a = m.scatter(x, y, s=ms)
+    
     return ax, m
 
 def plotMap(latlim=[20, 65], lonlim=[-160, -70], center=[39, -86],
             parallels=[20,30,40,50], 
             meridians = [-120,-110, -100, -90, -80,-70],
-            epoto=False):
-    
-    totality_path = h5py.File('/home/smrak/Documents/eclipse/totality.h5', 'r')
-    north_lat = np.array(totality_path['path/north_lat'])
-    north_lon = np.array(totality_path['path/north_lon'])
-    south_lat = np.array(totality_path['path/south_lat'])
-    south_lon = np.array(totality_path['path/south_lon'])
+            epoto=False, totality=True):
     
     (fig,ax) = plt.subplots(1,1,facecolor='w', figsize=(12,8))
     m = Basemap(lat_0=40, lon_0=-95,llcrnrlat=latlim[0],urcrnrlat=latlim[1],
@@ -49,10 +48,17 @@ def plotMap(latlim=[20, 65], lonlim=[-160, -70], center=[39, -86],
     if epoto == True:
         m.etopo()
     
-    X1,Y1 = m(north_lon, north_lat)
-    X2,Y2 = m(south_lon, south_lat)
-    m.plot(X1,Y1, c='b')
-    m.plot(X2,Y2, c='b')
+    if totality:
+        totality_path = h5py.File('/home/smrak/Documents/eclipse/totality.h5', 'r')
+        north_lat = np.array(totality_path['path/north_lat'])
+        north_lon = np.array(totality_path['path/north_lon'])
+        south_lat = np.array(totality_path['path/south_lat'])
+        south_lon = np.array(totality_path['path/south_lon'])
+    
+        X1,Y1 = m(north_lon, north_lat)
+        X2,Y2 = m(south_lon, south_lat)
+        m.plot(X1,Y1, c='b')
+        m.plot(X2,Y2, c='b')
         
     return fig, ax, m
 ################################################################################
@@ -60,12 +66,12 @@ def plotMap(latlim=[20, 65], lonlim=[-160, -70], center=[39, -86],
 ################################################################################
 def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], hdffilename='test'):#,6,12,19,24,25]):
     folder = '/media/smrak/Eclipse2017/Eclipse/cors/all/'
-    el_mask = 40
+    el_mask = 25
     fs = int(decimate[1:])
     corr_hours = 24
     # Get time arry in posix time - 1s resolution
-    observatiom_time_limit = [datetime.datetime.strptime('2017 '+str(233)+' 15 0 0', '%Y %j %H %M %S'), 
-                              datetime.datetime.strptime('2017 '+str(233)+' 21 0 0', '%Y %j %H %M %S')]
+    observatiom_time_limit = [datetime.datetime.strptime('2017 '+str(233)+' 14 30 0', '%Y %j %H %M %S'), 
+                              datetime.datetime.strptime('2017 '+str(233)+' 22 30 0', '%Y %j %H %M %S')]
     time_array = ec.createTimeArray(observatiom_time_limit)
     c = 1
     # Get rxlist for the deay of eclipse
@@ -170,13 +176,13 @@ def convertCORS2HDF(decimate='_30', days=[232,233], polynom_order=10, sv=[2,5], 
 #-------------------------------------------------------------------------------
 #fig, ax, m = plotMap()
 def plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test1.h5', skip=2,
-               decimate=30, clim=[-0.25, 0.25], img='tec', ms=10):
+               decimate=30, clim=[-0.25, 0.25], img='tec', ms=10, cmap='jet'):
     data = h5py.File(file, 'r')
     time = np.array(data['obstimes'])
     
     for k in data.keys():
         try:
-            lat_dumb = np.array(data[k+'/lat'])
+            lat_dumb = np.array(data['moco'+'/lat'])
             break
         except:
             pass
@@ -220,10 +226,10 @@ def plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test1.h5', skip=2,
                             print ('line 219: ',e)
 
                     if ci == 1:
-                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', cbar=True, alpha=0.9, ms=ms)
+                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cbar=True, ms=ms, cmap=cmap)
                         ci += 1
                     else:
-                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, cmap='jet', alpha=0.9, ms=ms)
+                        plotScatterTEC(lat=lat, lon=lon, z=z, clim=clim, ax=ax, m=m, ms=ms, cmap=cmap)
                 except Exception as e:
 #                    print ('line 227: ' + str(k) + 'Rx= ' '  Error: ' )
 #                    print (e)
@@ -233,10 +239,25 @@ def plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test1.h5', skip=2,
         except:
             pass
         fig.tight_layout()
-        fig.savefig('/media/smrak/Eclipse2017/Eclipse/pic/dtec/'+str(time[i])+'.png' )
+        fig.savefig('/media/smrak/Eclipse2017/Eclipse/pic/pp_filtered/'+str(time[i])+'.png' )
         plt.close(fig)
         c+=1
+################################################################################
+
+################################################################################
+def plotTotalityPath():
+    totality = ec.returnTotalityPath()
+    Tt = totality[0]
+    Tlat = totality[1]
+    Tlon = totality[2]
+    Ts = [datetime.datetime.utcfromtimestamp(i) for i in Tt]
+    for i in range(len(Tt)):
+#        print (Tlat[i], Tlon[i])
+        fig, ax, m = plotMap(lonlim=[-130,-70], latlim=[25,50], totality=False)
+        plotScatterTEC(Tlat[i], Tlon[i], alpha=1, ms=170, ax=ax, m=m)
+        ax.set_title(str(Ts[i]))
 #_______________________________________________________________________________
-convertCORS2HDF(sv=[2,5,6,12,17,19,24,25], hdffilename='test_44')
-#plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test4.h5', img='tec', clim=[-5,5], skip=3) #, clim=[-0.25,0.25]
-#plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test4.h5', img='res', skip=3) #, clim=[-0.25,0.25]
+#plotTotalityPath()
+#convertCORS2HDF(sv=[2,5,6,12,13,17,19,20,21,24,25,28,29], hdffilename='test_55')
+#plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/test_44.h5', img='tec', clim=[-5,5], skip=3) #, clim=[-0.25,0.25]
+plotTecMap(file='/media/smrak/Eclipse2017/Eclipse/hdf/perpartes_all_2_3_7_10.h5', img='res', skip=3, ms=5, cmap='jet', clim=[-0.2,0.2]) #, clim=[-0.25,0.25]

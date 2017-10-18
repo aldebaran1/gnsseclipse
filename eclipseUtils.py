@@ -12,6 +12,7 @@ import os
 import glob
 import datetime
 import pandas
+from pandas import read_hdf
 import yaml
 import h5py
 from mpl_toolkits.basemap import Basemap
@@ -50,24 +51,74 @@ def butter_lpf(fc, fs, order):
     return b, a
 
 
-def bpf(y, lowcut, highcut, fs=1, order=5):
+def bpf(y, lowcut, highcut, fs=1, order=5, plot=False):
     nyq = 0.5 * fs
     low = lowcut / nyq
     high = highcut / nyq
+    mid = ((highcut - lowcut)/3)*2 / nyq
+#    print (mid)
     b, a = signal.butter(order, [low, high], btype='band')
     w, h = signal.freqz(b, a, worN=1000)
     gd = -np.diff(np.unwrap(np.angle(h)))/np.diff(w)
+    idx = abs(w-high).argmin()
+#    print (idx)
     y_filt = signal.lfilter(b, a, y)
-    return y_filt , gd   
+    if plot:
+        plt.figure()
+#        plt.plot((fs * 0.5 / np.pi) * w, abs(h))
+        plt.semilogx(w, 20*np.log10(np.abs(h)))
+        plt.plot(w[idx], 20*np.log10(np.abs(h[idx])), 'xr')
+        plt.ylim([-60,5])
+#        plt.xlim([0, fs/2])
+        plt.title('Magnitude-normalized Butterworth filter frequency response')
+        plt.xlabel('Frequency [Hz]')
+        plt.ylabel('Amplitude [dB]')
+        plt.grid(which='both', axis='both')
+        ################################################
+    
+        plt.figure()
+        plt.semilogx(w[1:], gd)
+        plt.plot(w[idx], gd[idx], 'xr')
+        plt.title('LPF group delay')
+        plt.xlabel('Frequency [radians / second]')
+        plt.ylabel('Group delay [samples]')
+        plt.margins(0, 0.1)
+        plt.grid(which='both', axis='both')
+    return y_filt , gd[idx]
 
-def hpf(y, fc=0.1, order=5, fs=1):
+def hpf(y, fc=0.1, order=5, fs=1,plot=False, group_delay=False):
     """
     Sebastijan Mrak
     Filter the input data 'y' with desired HP filter.  
     """
     b, a = butter_hpf(fc, fs, order)
     y_filt = signal.lfilter(b, a, y)
-    return y_filt
+    w, h = signal.freqz(b, a, worN=1000)
+    gd = -np.diff(np.unwrap(np.angle(h)))/np.diff(w)
+    print ('Group delay of the filter is '+ str(gd[-1])+' samples.')
+    if plot:
+        plt.figure()
+#        plt.plot((fs * 0.5 / np.pi) * w, abs(h))
+        plt.semilogx(w, 20*np.log10(np.abs(h)))
+        plt.ylim([-60,5])
+#        plt.xlim([0, fs/2])
+        plt.title('Magnitude-normalized Butterworth filter frequency response')
+        plt.xlabel('Frequency [Hz]')
+        plt.ylabel('Amplitude [dB]')
+        plt.grid(which='both', axis='both')
+        ################################################
+    
+        plt.figure()
+        plt.semilogx(w[1:], gd)
+        plt.title('LPF group delay')
+        plt.xlabel('Frequency [radians / second]')
+        plt.ylabel('Group delay [samples]')
+        plt.margins(0, 0.1)
+        plt.grid(which='both', axis='both')
+    if group_delay:
+        return y_filt, gd[-1]
+    else:
+        return y_filt
 
 def lpf(y, fc=0.1, order=5, fs=1, plot=False, group_delay=False):
     b, a = butter_lpf(fc, fs, order)
@@ -77,11 +128,11 @@ def lpf(y, fc=0.1, order=5, fs=1, plot=False, group_delay=False):
     print ('Group delay of the filter is '+ str(gd[1])+' samples.')
     if plot:
         plt.figure()
-        plt.plot((fs * 0.5 / np.pi) * w, abs(h))
-        plt.semilogx(w, 20 * np.log10(np.abs(h)))
-        plt.ylim([-20,5])
-        plt.xlim([0, fs/2])
-        plt.title('Magnitude-normalized Bessel filter frequency response')
+#        plt.plot((fs * 0.5 / np.pi) * w, abs(h))
+        plt.semilogx(w, np.log10(np.abs(h)))
+        plt.ylim([-60,5])
+#        plt.xlim([0, fs/2])
+        plt.title('Magnitude-normalized butterworth filter frequency response')
         plt.xlabel('Frequency [Hz]')
         plt.ylabel('Amplitude [dB]')
         plt.grid(which='both', axis='both')
@@ -98,13 +149,20 @@ def lpf(y, fc=0.1, order=5, fs=1, plot=False, group_delay=False):
         return y_filt, gd[1]
     else:
         return y_filt
+    
+def interpolateLatLon(lat, lon, order = 3, resolution=0.1):
+    z = np.polyfit(lon, lat, order)
+    f = np.poly1d(z)
+    x_new = np.arange(min(lon), max(lon), resolution)
+    y_new = f(x_new)
+    return y_new, x_new
 
 def polynom(y, order=3):
-        x = range(y.shape[0])
-        z = np.polyfit(x, y, order)
-        f = np.poly1d(z)
-        y_new = f(x)
-        return y_new
+    x = range(y.shape[0])
+    z = np.polyfit(x, y, order)
+    f = np.poly1d(z)
+    y_new = f(x)
+    return y_new
     
 def correctSampling(t, y, fs=1):
     ts = pyGps.datetime2posix(t)
@@ -144,8 +202,8 @@ def getPhaseCorrTECGLONASS(L1,L2,P1,P2,fN):
     
     return tec
     
-def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_seconds=18, 
-              alt=300, sattype='G', el=False, lla=False, vertical=False, svbias=False, fN=0):
+def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_seconds=18, fN=0,
+              alt=300, sattype='G', el=False, lla=False, vertical=False, svbias=False, raw=False):
     obstimes = np.array((data.major_axis))
     obstimes = pandas.to_datetime(obstimes) - datetime.timedelta(seconds=leap_seconds)
     stream = yaml.load(open(yamlfile, 'r'))
@@ -189,12 +247,16 @@ def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_second
         t = t[idel]
         
         #Return time, TEC and respective third argumnet masked by an elavation mask angle
-        if el==False and lla==False:
+        if el==False and lla==False and raw==False:
             return t, tec
-        elif el==True and lla==False:
+        elif el==True and lla==False and raw==False:
             return t, tec, aer[:,idel]
-        elif el==False and lla ==True:
+        elif el==False and lla ==True and raw==False:
             return t, tec, llt[:,idel]
+        elif el==False and lla ==True and raw==True:
+            return t, tec, llt[:,idel], [L1[idel],L2[idel],C1[idel],C2[idel]]
+        elif el==True and lla ==False and raw==True:
+            return t, tec, aer[:,idel], [L1[idel],L2[idel],C1[idel],C2[idel]]
         else:
             return t, tec, aer[:,idel]
             
@@ -205,24 +267,67 @@ def returnTEC(data, sv, navfile, yamlfile, timelim=None, el_mask=30, leap_second
         C1 = np.array(data['C1', sv, :, 'data'])
         C2 = np.array(data['P2', sv, :, 'data'])
 ################################################################################
+def getResiduals(rxlist=['mobu'],decimate='_30',sv=2,day=233,Ts=30,el_mask=20,polynom_order=12, timelim=None, latlon=False):
+
+    if timelim is None:
+        timelim = [datetime.datetime.strptime('2017 '+str(day)+' 15 0 0', '%Y %j %H %M %S'), 
+                   datetime.datetime.strptime('2017 '+str(day)+' 21 0 0', '%Y %j %H %M %S')]
+
+    res = []
+    time = []
+    wsg = []
+    for rx in rxlist:
+        folder = '/media/smrak/Eclipse2017/Eclipse/cors/all/'+str(day)+'/'
+        navfile = '/media/smrak/Eclipse2017/Eclipse/nav/jplm'+str(day)+'0.17n'
+        hdffile = folder + rx + str(day)+'0'+decimate+'.h5'
+        yamlfile = folder + rx + str(day)+'0'+decimate+'.yaml'
+        
+        
+        try:
+            data = read_hdf(hdffile)
+            t, tec, lla, raws = returnTEC(data, sv=sv, navfile=navfile, yamlfile=yamlfile, 
+                                             timelim=timelim, el_mask=el_mask, lla=True, 
+                                             svbias=True, vertical=True, raw=True)
+            
+            ix, intervals = getIntervals(tec, maxgap=1, maxjump=1)
+            p = np.nan*np.ones(tec.shape[0])
+            for lst in intervals:
+                p[lst[0]:lst[1]] = polynom(tec[lst[0]:lst[1]], order=polynom_order)
+            p[0:10] = np.nan
+            p[-10:] = np.nan
+            z = tec - p
+            res.append(z)
+            time.append(t)
+            wsg.append(lla)
+        except:
+            print (rx)
+    if latlon:
+        return time, res, wsg
+    else:
+        return time, res
+################################################################################
 def getIntervals(y, maxgap=1, maxjump=0.5):
     r = np.array(range(len(y)))
     idx = np.isfinite(y)
     r = r[idx]
     intervals=[]
     if len(r)==0:
-        return idx, intervals
+        return intervals
     
-    beginning=r[0]
-    last=r[0]
-    for i in r[1:]:
-        if (i-last>maxgap) or (abs(r[i]-r[last])>maxjump):
-            intervals.append((beginning,last))
+    beginning = 0
+    last = 0
+#    print (r)
+    for i in range(len(r)):
+#        print (i,r[i], last)
+#        print ('-------------------')
+        if (r[i]-r[last] > maxgap) or (abs(y[i] - y[last]) > maxjump):
+            intervals.append((r[beginning],r[last]))
             beginning=i
         last=i
-        if i==r[-1]:
-            intervals.append([beginning,last])
-    return idx, intervals
+        if r[i]==r[-1]:
+            intervals.append([r[beginning],r[last]])
+            break
+    return intervals
 ################################################################################
 def _alignTimes(tlist, teclist, polylist, residuallist, fs):
     tmin = []
@@ -263,6 +368,21 @@ def createTimeArray(timelim):
     ts = pyGps.datetime2posix(timelim)
     t = range(int(ts[0]), int(ts[1])+1)
     return np.array(t)
+################################################################################
+def returnTotalityPath(width=False):
+    data = h5py.File('totality.h5', 'r')
+    time = np.array(data['path/time'])
+    center_lat = np.array(data['path/center_lat'])
+    center_lon = np.array(data['path/center_lon'])
+    north_lat = np.array(data['path/north_lat'])
+    north_lon = np.array(data['path/north_lon'])
+    south_lat = np.array(data['path/south_lat'])
+    south_lon = np.array(data['path/south_lon'])
+    
+    if not width:
+        return time, center_lat, center_lon
+    else:
+        return time, [center_lat, north_lat, south_lat], [center_lon, north_lon, south_lon]
 ################################################################################
 def _plotLOS(tlist, teclist, polylist, residuallist, rx='', sv=0, save=False,
              fig_path=None,
@@ -429,3 +549,8 @@ def _plotResidualsTEC(t,vtec,stec,residuallist1,residuallist2,sv='',rx=None,orde
     else:
         plt.show()
         plt.close(fig)
+        
+def multiLinesPlot(time, res, dist_coeff=0.5):
+    plt.figure()
+    for i in range(len(res)):
+        plt.plot(time[i], res[i]+i*0.15, 'b')
